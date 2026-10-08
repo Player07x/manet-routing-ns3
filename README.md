@@ -94,4 +94,4 @@ manet-routing-ns3/
 
 ## Grupo
 
-Redes Móveis — IFG Câmpus Inhumas, 2026/2. *(completar com o nome da dupla)*
+João Antonio André Barbosa Camilo e João Pedro Neto — Redes Móveis, IFG Câmpus Inhumas, 2026/2.
