@@ -26,10 +26,10 @@ cd <caminho-do-ns-3.48>
 ### Bateria completa (todas as combinações, ~20–22 minutos)
 
 ```bash
-./ns3 run scratch/manet-routing
+nohup ./ns3 run scratch/manet-routing > bateria.log 2>&1 &
 ```
 
-Roda automaticamente **3 protocolos × 2 áreas × 4 velocidades × 5 repetições = 120 execuções**, uma atrás da outra, em um único comando.
+Roda automaticamente **3 protocolos × 2 áreas × 4 velocidades × 5 repetições = 120 execuções**, uma atrás da outra, em um único comando. `nohup ... &` roda em segundo plano gravando o progresso em `bateria.log`, então a simulação continua mesmo se o terminal for fechado — acompanhe com `tail -f bateria.log`.
 
 ### Execução reduzida (teste rápido)
 
