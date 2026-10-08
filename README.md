@@ -23,13 +23,28 @@ cd <caminho-do-ns-3.48>
 
 ## Execução
 
-### Bateria completa (todas as combinações, ~20–22 minutos)
+### Bateria completa — forma recomendada (um comando só)
 
 ```bash
-nohup ./ns3 run scratch/manet-routing > bateria.log 2>&1 &
+./scripts/run_batch.sh
 ```
 
-Roda automaticamente **3 protocolos × 2 áreas × 4 velocidades × 5 repetições = 120 execuções**, uma atrás da outra, em um único comando. `nohup ... &` roda em segundo plano gravando o progresso em `bateria.log`, então a simulação continua mesmo se o terminal for fechado — acompanhe com `tail -f bateria.log`.
+Builda, roda as **3 protocolos × 2 áreas × 4 velocidades × 5 repetições = 120 execuções** (~20–22 minutos) e já copia o resultado para `data/raw/` dentro deste repositório. Para rodar em segundo plano, sobrevivendo ao fechamento do terminal:
+
+```bash
+nohup ./scripts/run_batch.sh > run_batch.log 2>&1 &
+```
+
+O script recusa rodar se já houver uma simulação em andamento, para evitar dois processos escrevendo no mesmo CSV ao mesmo tempo.
+
+### Bateria completa — passo a passo manual (equivalente)
+
+```bash
+cd <caminho-do-ns-3.48>
+nohup ./ns3 run scratch/manet-routing > bateria.log 2>&1 &
+# depois de terminar:
+cp <caminho-do-ns-3.48>/resultados-aodv-olsr-dsdv.csv <caminho-deste-repo>/data/raw/
+```
 
 ### Execução reduzida (teste rápido)
 
@@ -73,26 +88,40 @@ A execução grava `resultados-aodv-olsr-dsdv.csv` na pasta onde o `./ns3 run` f
 protocolo,area_m,velocidade_m_s,execucao,pacotes_enviados,pacotes_recebidos,pdr_percent,atraso_medio_ms,throughput_mbps,jitter_medio_ms
 ```
 
-Depois que a bateria terminar, copie o resultado para dentro do repositório e versione:
+`./scripts/run_batch.sh` já copia o CSV para `data/raw/` automaticamente. Depois disso, versione:
 
 ```bash
-cp ~/ns-3.48/resultados-aodv-olsr-dsdv.csv <caminho-deste-repo>/data/raw/
-cd <caminho-deste-repo>
 git add data/raw/resultados-aodv-olsr-dsdv.csv
 git commit -m "Adiciona resultados da bateria completa (120 execucoes)"
 git push
 ```
+
+## Análise e gráficos
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate   # uma vez só
+pip install -r requirements.txt                       # uma vez só
+python3 scripts/analyze.py
+```
+
+Lê `data/raw/resultados-aodv-olsr-dsdv.csv`, valida (PDR fora de 0–100%, execuções sem pacote enviado, contagem de repetições diferente de 5), salva as estatísticas agregadas (média e desvio padrão por protocolo × área × velocidade) em `data/processed/resultados-agregados.csv`, e gera em `figures/` os 4 gráficos obrigatórios — PDR, throughput, delay e jitter × velocidade, uma série por protocolo com barras de erro — separados entre cenário-base (500 m) e extensão do grupo (250 m).
 
 ## Estrutura do repositório
 
 ```
 manet-routing-ns3/
 ├── README.md
+├── requirements.txt
 ├── src/
 │   └── manet-routing.cc
-├── data/        — CSV bruto e processado (pendente)
-├── figures/     — gráficos obrigatórios (pendente)
-└── article/     — artigo final em PDF, modelo SBC (pendente)
+├── scripts/
+│   ├── run_batch.sh      — builda, roda a bateria completa e copia o CSV para data/raw/
+│   └── analyze.py        — valida, agrega e gera os gráficos a partir de data/raw/
+├── data/
+│   ├── raw/               — CSV bruto (pendente até rodar a bateria)
+│   └── processed/         — estatísticas agregadas (gerado por analyze.py)
+├── figures/               — gráficos obrigatórios (gerado por analyze.py)
+└── article/               — artigo final em PDF, modelo SBC (pendente)
 ```
 
 ## Status
