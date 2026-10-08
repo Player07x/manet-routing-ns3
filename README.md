@@ -67,10 +67,20 @@ Throughput (Mbps), Packet Delivery Ratio — PDR (%), atraso médio fim a fim (m
 
 ## Saídas
 
-A execução grava `resultados-aodv-olsr-dsdv.csv` na pasta onde o `./ns3 run` foi executado (raiz da instalação do ns-3), uma linha por execução:
+A execução grava `resultados-aodv-olsr-dsdv.csv` na pasta onde o `./ns3 run` foi executado (raiz da instalação do ns-3) — **não** dentro deste repositório, já que o simulador só roda de dentro de uma árvore ns-3 instalada. Uma linha por execução:
 
 ```
 protocolo,area_m,velocidade_m_s,execucao,pacotes_enviados,pacotes_recebidos,pdr_percent,atraso_medio_ms,throughput_mbps,jitter_medio_ms
+```
+
+Depois que a bateria terminar, copie o resultado para dentro do repositório e versione:
+
+```bash
+cp ~/ns-3.48/resultados-aodv-olsr-dsdv.csv <caminho-deste-repo>/data/raw/
+cd <caminho-deste-repo>
+git add data/raw/resultados-aodv-olsr-dsdv.csv
+git commit -m "Adiciona resultados da bateria completa (120 execucoes)"
+git push
 ```
 
 ## Estrutura do repositório
