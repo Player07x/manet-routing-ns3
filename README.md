@@ -104,6 +104,17 @@ pip install -r requirements.txt                       # uma vez só
 python3 scripts/analyze.py
 ```
 
+### Interface visual opcional
+
+Para executar a simulação, acompanhar o log, visualizar os resultados e exportar CSVs/ZIP pelo navegador:
+
+```bash
+pip install -r requirements.txt
+streamlit run scripts/dashboard.py
+```
+
+No Windows, execute esses comandos no PowerShell a partir da pasta do repositório. A interface é uma camada separada: o `scripts/analyze.py` e os comandos tradicionais continuam funcionando sem ela. O dashboard chama o ns-3 dentro do WSL, usando os parâmetros configuráveis de nós, tempo e repetições, e mantém o cenário experimental atual (AODV, OLSR e DSDV; áreas 500/250 m; velocidades 1/5/10/20 m/s).
+
 Lê `data/raw/resultados-aodv-olsr-dsdv.csv`, valida (PDR fora de 0–100%, execuções sem pacote enviado, contagem de repetições diferente de 5), salva as estatísticas agregadas (média e desvio padrão por protocolo × área × velocidade) em `data/processed/resultados-agregados.csv`, e gera em `figures/` os 4 gráficos obrigatórios — PDR, throughput, delay e jitter × velocidade, uma série por protocolo com barras de erro — separados entre cenário-base (500 m) e extensão do grupo (250 m).
 
 Se a bateria usar outra quantidade de repetições, informe-a na validação, por exemplo:
