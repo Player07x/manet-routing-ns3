@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <algorithm>
+#include <cmath>
 
 using namespace ns3;
 
@@ -91,6 +93,12 @@ resultados ExecutaSimulacao (const std::string &protocolo, uint32_t nNodes, doub
 
     //6. Aplicativo UDP - 4 fluxos simultaneos (exigido pelo cenario-base)
     const uint32_t nFluxos = 4;
+    const double inicioClientes = 10.0;
+    const double intervaloPacotes = 1.0;
+    // Mantem a aplicacao gerando trafego durante toda a janela util, inclusive
+    // quando simTime for aumentado para experimentos mais longos.
+    const uint32_t maxPacotes = std::max<uint32_t> (
+        1, static_cast<uint32_t> (std::ceil (std::max (0.0, simTime - inicioClientes) / intervaloPacotes)));
     uint16_t portas[nFluxos] = {9, 10, 11, 12};
     ApplicationContainer serverApps, clientApps;
     for (uint32_t f = 0; f < nFluxos; ++f){
@@ -104,11 +112,11 @@ resultados ExecutaSimulacao (const std::string &protocolo, uint32_t nNodes, doub
         serverApps.Add (serverApp);
 
         UdpEchoClientHelper echoClient (interfaces.GetAddress (destino), portas[f]);
-        echoClient.SetAttribute ("MaxPackets", UintegerValue (100));
-        echoClient.SetAttribute ("Interval", TimeValue (Seconds (1.0)));
+        echoClient.SetAttribute ("MaxPackets", UintegerValue (maxPacotes));
+        echoClient.SetAttribute ("Interval", TimeValue (Seconds (intervaloPacotes)));
         echoClient.SetAttribute ("PacketSize", UintegerValue (512));
         ApplicationContainer clientApp = echoClient.Install (nodes.Get (origem));
-        clientApp.Start (Seconds (10.0));
+        clientApp.Start (Seconds (inicioClientes));
         clientApp.Stop (Seconds (simTime));
         clientApps.Add (clientApp);
     }
@@ -126,6 +134,7 @@ resultados ExecutaSimulacao (const std::string &protocolo, uint32_t nNodes, doub
     resultados r = {0, 0, 0, 0.0, 0.0, 0.0, 0.0};
     double somaAtraso = 0.0;
     double somaJitter = 0.0;
+    uint64_t amostrasJitter = 0;
     std::set<uint16_t> portasFluxos = {9, 10, 11, 12};
     for (auto &par : monitor->GetFlowStats ()){
         Ipv4FlowClassifier::FiveTuple t = classifier->FindFlow (par.first);
@@ -135,13 +144,16 @@ resultados ExecutaSimulacao (const std::string &protocolo, uint32_t nNodes, doub
             r.rxBytes += par.second.rxBytes;
             somaAtraso += par.second.delaySum.GetSeconds ();
             somaJitter += par.second.jitterSum.GetSeconds ();
+            if (par.second.rxPackets > 1){
+                amostrasJitter += par.second.rxPackets - 1;
+            }
         }
     }
-    double duracaoUtil = simTime - 10.0; // janela entre o inicio dos clientes e o fim da simulacao
+    double duracaoUtil = std::max (0.0, simTime - inicioClientes);
     r.pdr = (r.tx > 0) ? 100.0 * r.rx / r.tx : 0.0;
     r.atrasoMs = (r.rx > 0) ? 1000.0 * somaAtraso / r.rx : 0.0;
     r.throughputMbps = (duracaoUtil > 0) ? (r.rxBytes * 8.0) / (duracaoUtil * 1e6) : 0.0;
-    r.jitterMs = (r.rx > 1) ? 1000.0 * somaJitter / (r.rx - 1) : 0.0;
+    r.jitterMs = (amostrasJitter > 0) ? 1000.0 * somaJitter / amostrasJitter : 0.0;
 
     Simulator::Destroy ();
     return r;

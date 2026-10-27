@@ -52,7 +52,7 @@ def carregar_dados(caminho):
         return list(csv.DictReader(f))
 
 
-def validar(linhas):
+def validar(linhas, repeticoes_esperadas=REPETICOES_ESPERADAS):
     problemas = []
     contagem = defaultdict(int)
     for r in linhas:
@@ -65,8 +65,8 @@ def validar(linhas):
             problemas.append(f"Nenhum pacote enviado em {chave}, execucao {r['execucao']}")
 
     for chave, n in contagem.items():
-        if n != REPETICOES_ESPERADAS:
-            problemas.append(f"{chave} tem {n} execucoes (esperado {REPETICOES_ESPERADAS})")
+        if repeticoes_esperadas is not None and n != repeticoes_esperadas:
+            problemas.append(f"{chave} tem {n} execucoes (esperado {repeticoes_esperadas})")
 
     if problemas:
         print(f"Avisos de validacao ({len(problemas)}):")
@@ -125,8 +125,19 @@ def gerar_graficos(agregados, area_alvo, sufixo, rotulo_area):
             x = [p[0] for p in pontos]
             y = [p[1] for p in pontos]
             erro = [p[2] for p in pontos]
+            # Desvio-padrao pode fazer a barra ultrapassar limites fisicos
+            # (por exemplo, PDR abaixo de 0%). Mantemos a media e recortamos
+            # apenas a barra de erro para a faixa fisicamente valida.
+            limite_inferior = 0.0
+            limite_superior = 100.0 if coluna == "pdr_percent" else None
+            erro_inferior = [min(e, max(0.0, valor - limite_inferior)) for valor, e in zip(y, erro)]
+            erro_superior = [
+                min(e, max(0.0, limite_superior - valor))
+                if limite_superior is not None else e
+                for valor, e in zip(y, erro)
+            ]
             ax.errorbar(
-                x, y, yerr=erro,
+                x, y, yerr=[erro_inferior, erro_superior],
                 marker=MARCADORES[protocolo], markersize=7, linewidth=2,
                 capsize=4, label=protocolo, color=CORES[protocolo],
             )
@@ -134,6 +145,9 @@ def gerar_graficos(agregados, area_alvo, sufixo, rotulo_area):
         ax.set_xlabel("Velocidade (m/s)")
         ax.set_ylabel(rotulo_y)
         ax.set_title(f"{rotulo_y} x Velocidade — {rotulo_area}")
+        ax.set_ylim(bottom=0)
+        if coluna == "pdr_percent":
+            ax.set_ylim(0, 100)
         ax.legend()
         ax.grid(True, alpha=0.3)
         fig.tight_layout()
@@ -146,10 +160,15 @@ def gerar_graficos(agregados, area_alvo, sufixo, rotulo_area):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=DEFAULT_RAW_CSV, help="Caminho do CSV bruto")
+    parser.add_argument(
+        "--expected-runs", type=int, default=REPETICOES_ESPERADAS,
+        help="Numero esperado de repeticoes por combinacao (use 0 para nao validar)",
+    )
     args = parser.parse_args()
 
     linhas = carregar_dados(args.input)
-    linhas = validar(linhas)
+    repeticoes_esperadas = args.expected_runs if args.expected_runs > 0 else None
+    linhas = validar(linhas, repeticoes_esperadas)
     agregados = agregar(linhas)
     salvar_processado(agregados)
     gerar_graficos(agregados, area_alvo=500.0, sufixo="area500_base", rotulo_area="cenario-base, 500x500 m")
