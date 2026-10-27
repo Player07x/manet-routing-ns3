@@ -1,16 +1,19 @@
 """Interface local para executar e analisar as simulacoes MANET.
 
-Executar no Windows/PowerShell:
+Executar no Windows/PowerShell ou no Ubuntu:
     streamlit run scripts/dashboard.py
 
 O dashboard e opcional e nao substitui scripts/analyze.py. Ele usa o
-simulador existente no WSL e os mesmos arquivos CSV/PNG do repositorio.
+simulador existente no WSL no Windows, ou diretamente no Ubuntu, e os mesmos
+arquivos CSV/PNG do repositorio.
 """
 
 from __future__ import annotations
 
 import io
+import os
 import shlex
+import shutil
 import subprocess
 import zipfile
 from pathlib import Path
@@ -35,8 +38,20 @@ COLORS = {"AODV": "#0072B2", "OLSR": "#E69F00", "DSDV": "#009E73"}
 MARKERS = {"AODV": "o", "OLSR": "s", "DSDV": "^"}
 
 
+def uses_wsl() -> bool:
+    """Retorna se o dashboard deve executar o simulador dentro do WSL."""
+    return os.name == "nt"
+
+
 def to_wsl_path(path: Path, distro: str) -> str:
-    """Converte um caminho Windows para o caminho visto pelo WSL."""
+    """Converte um caminho Windows para o caminho visto pelo WSL.
+
+    Em sistemas Unix o caminho já é válido para o processo local. Manter essa
+    função multiplataforma evita que o restante do dashboard precise conhecer
+    os detalhes do ambiente de execução.
+    """
+    if not uses_wsl():
+        return str(path)
     try:
         result = subprocess.run(
             ["wsl.exe", "-d", distro, "--", "wslpath", "-a", str(path)],
@@ -47,17 +62,19 @@ def to_wsl_path(path: Path, distro: str) -> str:
         return result.stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         drive = path.drive.rstrip(":").lower()
+        if not drive:
+            return str(path)
         return f"/mnt/{drive}/{path.as_posix().split(':/', 1)[-1]}"
 
 
 def start_simulation(distro: str, ns3_dir: str, n_nodes: int, sim_time: float, n_runs: int) -> Path:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "dashboard-run.log"
-    repo_wsl = to_wsl_path(REPO_DIR, distro)
+    repo_runtime = to_wsl_path(REPO_DIR, distro)
     command = f"""set -e
 NS3_DIR={shlex.quote(ns3_dir)}
 NS3_DIR="${{NS3_DIR/#\\~/$HOME}}"
-REPO_DIR={shlex.quote(repo_wsl)}
+REPO_DIR={shlex.quote(repo_runtime)}
 cp "$REPO_DIR/src/manet-routing.cc" "$NS3_DIR/scratch/manet-routing.cc"
 cd "$NS3_DIR"
 ./ns3 build manet-routing
@@ -65,13 +82,21 @@ cd "$NS3_DIR"
 mkdir -p "$REPO_DIR/data/raw"
 cp "$NS3_DIR/resultados-aodv-olsr-dsdv.csv" "$REPO_DIR/data/raw/"
 """
+    if uses_wsl():
+        runner = ["wsl.exe", "-d", distro, "--", "bash", "-lc", command]
+    else:
+        runner = [shutil.which("bash") or "bash", "-lc", command]
+
     log_file = log_path.open("w", encoding="utf-8")
-    process = subprocess.Popen(
-        ["wsl.exe", "-d", distro, "--", "bash", "-lc", command],
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-    )
+    try:
+        process = subprocess.Popen(
+            runner,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        )
+    finally:
+        log_file.close()
     st.session_state.process = process
     st.session_state.log_path = log_path
     st.session_state.run_config = {
@@ -85,11 +110,29 @@ cp "$NS3_DIR/resultados-aodv-olsr-dsdv.csv" "$REPO_DIR/data/raw/"
 
 def simulation_running(distro: str) -> bool:
     """Evita iniciar duas baterias que escreveriam no mesmo CSV."""
-    result = subprocess.run(
-        ["wsl.exe", "-d", distro, "--", "bash", "-lc", "pgrep -f '[/]build/scratch/.*manet-routing'"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    if uses_wsl():
+        command = [
+            "wsl.exe",
+            "-d",
+            distro,
+            "--",
+            "bash",
+            "-lc",
+            "pgrep -f '[/]build/scratch/.*manet-routing'",
+        ]
+    else:
+        command = [shutil.which("pgrep") or "pgrep", "-f", "[/]build/scratch/.*manet-routing"]
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        # Se a ferramenta de inspeção de processos não estiver instalada,
+        # não bloqueie o início da simulação. O processo iniciado pelo
+        # próprio dashboard ainda é acompanhado por session_state.process.
+        return False
     return result.returncode == 0
 
 
@@ -211,8 +254,16 @@ def main():
 
     with st.sidebar:
         st.header("Configuracao da execucao")
-        distro = st.text_input("Distribuicao WSL", "Ubuntu-24.04")
-        ns3_dir = st.text_input("Pasta do ns-3 no WSL", "/home/joaoa/ns-3.48")
+        if uses_wsl():
+            distro = st.text_input("Distribuicao WSL", "Ubuntu-24.04")
+            ns3_label = "Pasta do ns-3 no WSL"
+            ns3_default = "/home/joaoa/ns-3.48"
+        else:
+            distro = ""
+            st.info("Ubuntu detectado: a simulacao sera executada localmente.")
+            ns3_label = "Pasta local do ns-3"
+            ns3_default = str(Path.home() / "ns-3.48")
+        ns3_dir = st.text_input(ns3_label, ns3_default)
         n_nodes = st.number_input("Numero de nos", min_value=2, value=20, step=1)
         sim_time = st.number_input("Tempo de simulacao (s)", min_value=1.0, value=120.0, step=10.0)
         n_runs = st.number_input("Repeticoes por combinacao", min_value=1, value=5, step=1)
@@ -232,7 +283,7 @@ def main():
                 log_path = start_simulation(distro, ns3_dir, int(n_nodes), float(sim_time), int(n_runs))
                 st.success(f"Simulacao iniciada. Log: {log_path}")
             except OSError as exc:
-                st.error(f"Nao foi possivel iniciar o WSL: {exc}")
+                st.error(f"Nao foi possivel iniciar a simulacao: {exc}")
 
     process = st.session_state.process
     if process is not None:

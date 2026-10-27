@@ -113,7 +113,7 @@ pip install -r requirements.txt
 streamlit run scripts/dashboard.py
 ```
 
-No Windows, execute esses comandos no PowerShell a partir da pasta do repositório. A interface é uma camada separada: o `scripts/analyze.py` e os comandos tradicionais continuam funcionando sem ela. O dashboard chama o ns-3 dentro do WSL, usando os parâmetros configuráveis de nós, tempo e repetições, e mantém o cenário experimental atual (AODV, OLSR e DSDV; áreas 500/250 m; velocidades 1/5/10/20 m/s).
+Execute esses comandos a partir da pasta do repositório. No Windows, o dashboard chama o ns-3 dentro do WSL; no Ubuntu, ele executa o ns-3 diretamente no sistema local. A interface é uma camada separada: o `scripts/analyze.py` e os comandos tradicionais continuam funcionando sem ela. A simulação usa os parâmetros configuráveis de nós, tempo e repetições e mantém o cenário experimental atual (AODV, OLSR e DSDV; áreas 500/250 m; velocidades 1/5/10/20 m/s). No Ubuntu, informe a pasta local do ns-3 (por padrão, `~/ns-3.48`); no Windows, informe a pasta do ns-3 dentro do WSL.
 
 Lê `data/raw/resultados-aodv-olsr-dsdv.csv`, valida (PDR fora de 0–100%, execuções sem pacote enviado, contagem de repetições diferente de 5), salva as estatísticas agregadas (média e desvio padrão por protocolo × área × velocidade) em `data/processed/resultados-agregados.csv`, e gera em `figures/` os 4 gráficos obrigatórios — PDR, throughput, delay e jitter × velocidade, uma série por protocolo com barras de erro — separados entre cenário-base (500 m) e extensão do grupo (250 m).
 
