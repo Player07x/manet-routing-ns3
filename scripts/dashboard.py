@@ -13,8 +13,10 @@ from __future__ import annotations
 import io
 import os
 import shlex
+import signal
 import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -22,20 +24,23 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
+# Reaproveita a agregacao (IC 95%) e os graficos de scripts/analyze.py
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from analyze import COLUNAS_OBRIGATORIAS, agregar, criar_figura  # noqa: E402
+
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 RAW_CSV = REPO_DIR / "data" / "raw" / "resultados-aodv-olsr-dsdv.csv"
 FIGURES_DIR = REPO_DIR / "figures"
 LOG_DIR = REPO_DIR / "logs"
 
+# Metrica -> nome curto usado no arquivo PNG exportado
 METRICS = {
-    "pdr_percent": ("PDR (%)", "pdr"),
-    "throughput_mbps": ("Throughput (Mbps)", "throughput"),
-    "atraso_medio_ms": ("Atraso medio (ms)", "delay"),
-    "jitter_medio_ms": ("Jitter medio (ms)", "jitter"),
+    "pdr_percent": "pdr",
+    "throughput_kbps": "throughput",
+    "atraso_medio_ms": "delay",
+    "jitter_medio_ms": "jitter",
 }
-COLORS = {"AODV": "#0072B2", "OLSR": "#E69F00", "DSDV": "#009E73"}
-MARKERS = {"AODV": "o", "OLSR": "s", "DSDV": "^"}
 
 
 def uses_wsl() -> bool:
@@ -67,7 +72,10 @@ def to_wsl_path(path: Path, distro: str) -> str:
         return f"/mnt/{drive}/{path.as_posix().split(':/', 1)[-1]}"
 
 
-def start_simulation(distro: str, ns3_dir: str, n_nodes: int, sim_time: float, n_runs: int) -> Path:
+def start_simulation(
+    distro: str, ns3_dir: str, n_nodes: int, sim_time: float, n_runs: int, alcance: float,
+    workers: int,
+) -> Path:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "dashboard-run.log"
     repo_runtime = to_wsl_path(REPO_DIR, distro)
@@ -75,12 +83,9 @@ def start_simulation(distro: str, ns3_dir: str, n_nodes: int, sim_time: float, n
 NS3_DIR={shlex.quote(ns3_dir)}
 NS3_DIR="${{NS3_DIR/#\\~/$HOME}}"
 REPO_DIR={shlex.quote(repo_runtime)}
-cp "$REPO_DIR/src/manet-routing.cc" "$NS3_DIR/scratch/manet-routing.cc"
-cd "$NS3_DIR"
-./ns3 build manet-routing
-./ns3 run "scratch/manet-routing --nNodes={n_nodes} --simTime={sim_time:g} --nRuns={n_runs}"
-mkdir -p "$REPO_DIR/data/raw"
-cp "$NS3_DIR/resultados-aodv-olsr-dsdv.csv" "$REPO_DIR/data/raw/"
+exec python3 "$REPO_DIR/scripts/run_batch_parallel.py" --ns3-dir "$NS3_DIR" \\
+    --workers {workers} --nNodes {n_nodes} --simTime {sim_time:g} --nRuns {n_runs} \\
+    --alcance {alcance:g}
 """
     if uses_wsl():
         runner = ["wsl.exe", "-d", distro, "--", "bash", "-lc", command]
@@ -89,12 +94,14 @@ cp "$NS3_DIR/resultados-aodv-olsr-dsdv.csv" "$REPO_DIR/data/raw/"
 
     log_file = log_path.open("w", encoding="utf-8")
     try:
-        process = subprocess.Popen(
-            runner,
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
-        )
+        popen_options = {
+            "stdout": log_file,
+            "stderr": subprocess.STDOUT,
+            "creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+        }
+        if os.name != "nt":
+            popen_options["start_new_session"] = True
+        process = subprocess.Popen(runner, **popen_options)
     finally:
         log_file.close()
     st.session_state.process = process
@@ -103,9 +110,41 @@ cp "$NS3_DIR/resultados-aodv-olsr-dsdv.csv" "$REPO_DIR/data/raw/"
         "nNodes": n_nodes,
         "simTime": sim_time,
         "nRuns": n_runs,
+        "alcance": alcance,
+        "workers": workers,
         "total": 3 * 2 * 4 * n_runs,
     }
     return log_path
+
+
+def stop_simulation(process: subprocess.Popen, timeout: float = 10.0) -> None:
+    """Encerra o processo do dashboard e os processos filhos do ns-3."""
+    if process.poll() is not None:
+        return
+
+    if os.name == "nt":
+        # CTRL_BREAK encerra o grupo criado com CREATE_NEW_PROCESS_GROUP.
+        try:
+            process.send_signal(signal.CTRL_BREAK_EVENT)
+        except (OSError, ValueError):
+            process.terminate()
+    else:
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        except ProcessLookupError:
+            return
+
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        if os.name == "nt":
+            process.kill()
+        else:
+            try:
+                os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.wait(timeout=timeout)
 
 
 def simulation_running(distro: str) -> bool:
@@ -140,70 +179,29 @@ def read_results() -> pd.DataFrame | None:
     if not RAW_CSV.exists() or RAW_CSV.stat().st_size == 0:
         return None
     try:
-        return pd.read_csv(RAW_CSV)
+        df = pd.read_csv(RAW_CSV)
     except (OSError, pd.errors.ParserError) as exc:
         st.error(f"Nao foi possivel ler o CSV: {exc}")
         return None
+    if "throughput_mbps" in df.columns:
+        st.error("O CSV em data/raw/ foi gerado por uma versao antiga do simulador (PDR do OLSR, "
+                 "throughput e atraso/jitter calculados de forma incorreta). Rode a bateria novamente.")
+        return None
+    missing = [column for column in COLUNAS_OBRIGATORIAS if column not in df.columns]
+    if missing:
+        st.error(f"Colunas ausentes no CSV: {', '.join(missing)}")
+        return None
+    return df
 
 
-def aggregate(df: pd.DataFrame) -> pd.DataFrame:
-    numeric = list(METRICS)
-    grouped = (
-        df.groupby(["protocolo", "area_m", "velocidade_m_s"])[numeric]
-        .agg(["mean", "std"])
-        .reset_index()
-    )
-    grouped.columns = [
-        "protocolo",
-        "area_m",
-        "velocidade_m_s",
-        *[f"{metric}_{stat}" for metric in numeric for stat in ("mean", "std")],
-    ]
-    return grouped.fillna(0)
-
-
-def make_figure(grouped: pd.DataFrame, area: float, metric: str):
-    label, short_name = METRICS[metric]
-    area_data = grouped[grouped["area_m"] == area]
-    fig, ax = plt.subplots(figsize=(8, 5))
-    for protocol in ("AODV", "OLSR", "DSDV"):
-        points = area_data[area_data["protocolo"] == protocol].sort_values("velocidade_m_s")
-        if points.empty:
-            continue
-        x = points["velocidade_m_s"].to_numpy()
-        y = points[f"{metric}_mean"].to_numpy()
-        std = points[f"{metric}_std"].to_numpy()
-        lower = np_min(std, y)
-        upper = std
-        if metric == "pdr_percent":
-            upper = np_min(std, 100 - y)
-        ax.errorbar(
-            x,
-            y,
-            yerr=[lower, upper],
-            marker=MARKERS[protocol],
-            linewidth=2,
-            capsize=4,
-            label=protocol,
-            color=COLORS[protocol],
-        )
-    ax.set_xlabel("Velocidade (m/s)")
-    ax.set_ylabel(label)
-    ax.set_title(f"{label} x Velocidade — area {area:g}x{area:g} m")
-    ax.set_ylim(0, 100) if metric == "pdr_percent" else ax.set_ylim(bottom=0)
-    ax.grid(True, alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    return fig, f"{short_name}_area{int(area)}.png"
-
-
-def np_min(left, right):
-    """Minimo elemento a elemento sem exigir numpy como dependencia direta."""
-    return [min(float(a), max(0.0, float(b))) for a, b in zip(left, right)]
+def make_figure(aggregated: list[dict], area: float, metric: str):
+    fig = criar_figura(aggregated, area, metric, f"area {area:g}x{area:g} m")
+    return fig, f"{METRICS[metric]}_area{int(area)}.png"
 
 
 def render_results(df: pd.DataFrame):
-    grouped = aggregate(df)
+    aggregated = agregar(df.to_dict("records"))
+    grouped = pd.DataFrame(aggregated)
     st.subheader("Resumo dos resultados")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Execucoes", len(df))
@@ -217,7 +215,7 @@ def render_results(df: pd.DataFrame):
         st.markdown(f"#### Area {area:g} x {area:g} m")
         columns = st.columns(2)
         for index, metric in enumerate(METRICS):
-            figure, filename = make_figure(grouped, area, metric)
+            figure, filename = make_figure(aggregated, area, metric)
             with columns[index % 2]:
                 st.pyplot(figure, clear_figure=False)
                 figure_bytes = io.BytesIO()
@@ -244,6 +242,35 @@ def render_results(df: pd.DataFrame):
     st.download_button("Exportar CSVs em ZIP", archive.getvalue(), "resultados-manet.zip", "application/zip")
 
 
+def render_process_status():
+    """Mostra o estado atual do processo iniciado pelo dashboard."""
+    process = st.session_state.process
+    if process is None:
+        return
+    if process.poll() is None:
+        st.warning("Simulacao em andamento. O status e atualizado automaticamente.")
+    elif st.session_state.interrupted:
+        st.info("A simulacao foi interrompida. O CSV anterior foi preservado.")
+    elif process.returncode == 0:
+        st.success("Simulacao concluida e CSV copiado para data/raw/.")
+    else:
+        st.error(f"A simulacao terminou com codigo {process.returncode}.")
+
+
+def render_auto_status():
+    """Atualiza somente o status a cada dois segundos quando suportado."""
+    process = st.session_state.process
+    if process is None or process.poll() is not None:
+        render_process_status()
+        return
+    fragment = getattr(st, "fragment", None)
+    if fragment is None:
+        render_process_status()
+        return
+    auto_status = fragment(render_process_status, run_every="2s")
+    auto_status()
+
+
 def main():
     st.set_page_config(page_title="MANET + ns-3", page_icon="📡", layout="wide")
     st.title("📡 MANET + ns-3")
@@ -251,6 +278,7 @@ def main():
 
     st.session_state.setdefault("process", None)
     st.session_state.setdefault("log_path", LOG_DIR / "dashboard-run.log")
+    st.session_state.setdefault("interrupted", False)
 
     with st.sidebar:
         st.header("Configuracao da execucao")
@@ -267,9 +295,14 @@ def main():
         n_nodes = st.number_input("Numero de nos", min_value=2, value=20, step=1)
         sim_time = st.number_input("Tempo de simulacao (s)", min_value=1.0, value=120.0, step=10.0)
         n_runs = st.number_input("Repeticoes por combinacao", min_value=1, value=5, step=1)
+        alcance = st.number_input("Alcance do radio (m)", min_value=1.0, value=250.0, step=10.0)
+        workers = st.number_input("Processos simultaneos", min_value=1, value=4, step=1)
         st.info("O simulador atual usa 3 protocolos, 2 areas e 4 velocidades fixas. Total estimado: "
                 f"{3 * 2 * 4 * n_runs} execucoes.")
         start = st.button("▶ Iniciar simulacao", use_container_width=True, type="primary")
+        current_process = st.session_state.process
+        running = current_process is not None and current_process.poll() is None
+        stop = st.button("■ Interromper simulacao", use_container_width=True, disabled=not running)
         refresh = st.button("Atualizar status", use_container_width=True)
 
     if start:
@@ -280,19 +313,26 @@ def main():
             st.warning("O ns-3 ja possui uma simulacao manet-routing em execucao.")
         else:
             try:
-                log_path = start_simulation(distro, ns3_dir, int(n_nodes), float(sim_time), int(n_runs))
+                log_path = start_simulation(
+                    distro, ns3_dir, int(n_nodes), float(sim_time), int(n_runs), float(alcance),
+                    int(workers),
+                )
+                st.session_state.interrupted = False
                 st.success(f"Simulacao iniciada. Log: {log_path}")
             except OSError as exc:
                 st.error(f"Nao foi possivel iniciar a simulacao: {exc}")
 
-    process = st.session_state.process
-    if process is not None:
-        if process.poll() is None:
-            st.warning("Simulacao em andamento. Use 'Atualizar status' para obter o progresso.")
-        elif process.returncode == 0:
-            st.success("Simulacao concluida e CSV copiado para data/raw/.")
-        else:
-            st.error(f"A simulacao terminou com codigo {process.returncode}.")
+    if stop:
+        process = st.session_state.process
+        if process is not None and process.poll() is None:
+            try:
+                stop_simulation(process)
+                st.session_state.interrupted = True
+                st.info("Simulacao interrompida.")
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                st.error(f"Nao foi possivel interromper a simulacao: {exc}")
+
+    render_auto_status()
 
     log_path = Path(st.session_state.log_path)
     if log_path.exists():
