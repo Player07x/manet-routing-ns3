@@ -195,7 +195,7 @@ def read_results() -> pd.DataFrame | None:
 
 
 def make_figure(aggregated: list[dict], area: float, metric: str):
-    fig = criar_figura(aggregated, area, metric, f"area {area:g}x{area:g} m")
+    fig = criar_figura(aggregated, area, metric, f"área {area:g}×{area:g} m")
     return fig, f"{METRICS[metric]}_area{int(area)}.png"
 
 
