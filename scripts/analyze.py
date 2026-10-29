@@ -31,8 +31,8 @@ FIGURES_DIR = REPO_DIR / "figures"
 METRICAS = {
     "pdr_percent": ("PDR (%)", "pdr_vs_velocidade"),
     "throughput_kbps": ("Throughput (kbps)", "throughput_vs_velocidade"),
-    "atraso_medio_ms": ("Atraso medio (ms)", "delay_vs_velocidade"),
-    "jitter_medio_ms": ("Jitter medio (ms)", "jitter_vs_velocidade"),
+    "atraso_medio_ms": ("Atraso médio (ms)", "delay_vs_velocidade"),
+    "jitter_medio_ms": ("Jitter médio (ms)", "jitter_vs_velocidade"),
 }
 COLUNAS_OBRIGATORIAS = [
     "protocolo", "area_m", "velocidade_m_s", "execucao",
@@ -45,6 +45,8 @@ REPETICOES_ESPERADAS = 5
 # Paleta Okabe-Ito (seguro para daltonismo), uma cor fixa por protocolo
 CORES = {"AODV": "#0072B2", "OLSR": "#E69F00", "DSDV": "#009E73"}
 MARCADORES = {"AODV": "o", "OLSR": "s", "DSDV": "^"}
+# Deslocamento horizontal (m/s) de cada protocolo, para as barras de erro nao se sobreporem
+DESLOCAMENTO = {"AODV": -0.3, "OLSR": 0.0, "DSDV": 0.3}
 
 # Quantil 0,975 da t de Student para 1..30 graus de liberdade (IC bilateral de 95%)
 T_975 = [
@@ -155,6 +157,13 @@ def agregar(linhas):
             linha[f"{col}_desvio"] = desvio
             linha[f"{col}_ic95"] = ic95
             linha[f"{col}_n"] = n
+        # Com pacotes de tamanho fixo, throughput / PDR e a carga ofertada pela aplicacao
+        cargas = [
+            float(r["throughput_kbps"]) / (float(r["pdr_percent"]) / 100.0)
+            for r in grupo
+            if float(r["pdr_percent"]) > 0
+        ]
+        linha["carga_ofertada_kbps"] = mean(cargas) if cargas else math.nan
         agregados.append(linha)
     return agregados
 
@@ -173,7 +182,8 @@ def salvar_processado(agregados):
 def criar_figura(agregados, area_alvo, coluna, rotulo_area):
     rotulo_y = METRICAS[coluna][0]
     dados_area = [a for a in agregados if a["area_m"] == area_alvo]
-    fig, ax = plt.subplots(figsize=(7, 5))
+    fig, ax = plt.subplots(figsize=(7, 5.4), layout="constrained")
+    topo = 0.0
     for protocolo in PROTOCOLOS:
         pontos = sorted(
             (a["velocidade_m_s"], a[f"{coluna}_media"], a[f"{coluna}_ic95"])
@@ -182,7 +192,7 @@ def criar_figura(agregados, area_alvo, coluna, rotulo_area):
         )
         if not pontos:
             continue
-        x = [p[0] for p in pontos]
+        x = [p[0] + DESLOCAMENTO[protocolo] for p in pontos]
         y = [p[1] for p in pontos]
         erro = [0.0 if math.isnan(p[2]) else p[2] for p in pontos]
         # Com poucas execucoes o IC pode ultrapassar limites fisicos (por exemplo,
@@ -195,21 +205,33 @@ def criar_figura(agregados, area_alvo, coluna, rotulo_area):
             if limite_superior is not None else e
             for valor, e in zip(y, erro)
         ]
+        topo = max([topo] + [v + e for v, e in zip(y, erro_superior) if not math.isnan(v)])
         ax.errorbar(
             x, y, yerr=[erro_inferior, erro_superior],
             marker=MARCADORES[protocolo], markersize=7, linewidth=2,
             capsize=4, label=protocolo, color=CORES[protocolo],
         )
 
+    if coluna == "throughput_kbps":
+        cargas = [a["carga_ofertada_kbps"] for a in dados_area if not math.isnan(a["carga_ofertada_kbps"])]
+        if cargas:
+            carga = mean(cargas)
+            ax.axhline(carga, color="0.4", linestyle="--", linewidth=1.2, label="Carga ofertada")
+            topo = max(topo, carga)
+
+    velocidades = sorted({a["velocidade_m_s"] for a in dados_area})
+    ax.set_xticks(velocidades, [f"{v:g}" for v in velocidades])
     ax.set_xlabel("Velocidade (m/s)")
     ax.set_ylabel(rotulo_y)
-    ax.set_title(f"{rotulo_y} x Velocidade — {rotulo_area}")
-    ax.set_ylim(bottom=0)
+    ax.set_title(f"{rotulo_y} × velocidade — {rotulo_area}")
+    # Margem acima do maior valor para os marcadores nao ficarem cortados na borda
     if coluna == "pdr_percent":
         ax.set_ylim(0, 105)
-    ax.legend(title="Barras: IC 95%")
+    else:
+        ax.set_ylim(0, topo * 1.12 if topo > 0 else 1.0)
     ax.grid(True, alpha=0.3)
-    fig.tight_layout()
+    # Legenda fora da area do grafico, para nunca cobrir pontos ou barras de erro
+    fig.legend(loc="outside lower center", ncol=4, title="Barras de erro: IC 95%", frameon=False)
     return fig
 
 
@@ -241,8 +263,8 @@ def main():
     linhas = validar(linhas, repeticoes_esperadas)
     agregados = agregar(linhas)
     salvar_processado(agregados)
-    gerar_graficos(agregados, area_alvo=500.0, sufixo="area500_base", rotulo_area="cenario-base, 500x500 m")
-    gerar_graficos(agregados, area_alvo=250.0, sufixo="area250_extensao", rotulo_area="extensao do grupo, 250x250 m")
+    gerar_graficos(agregados, area_alvo=500.0, sufixo="area500_base", rotulo_area="cenário-base, 500×500 m")
+    gerar_graficos(agregados, area_alvo=250.0, sufixo="area250_extensao", rotulo_area="extensão do grupo, 250×250 m")
 
 
 if __name__ == "__main__":
