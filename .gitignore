@@ -6,3 +6,8 @@ __pycache__/
 *~
 .venv/
 logs/
+article/*.aux
+article/*.bbl
+article/*.blg
+article/*.log
+article/*.out

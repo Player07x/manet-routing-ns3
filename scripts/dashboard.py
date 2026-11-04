@@ -37,7 +37,7 @@ LOG_DIR = REPO_DIR / "logs"
 # Metrica -> nome curto usado no arquivo PNG exportado
 METRICS = {
     "pdr_percent": "pdr",
-    "throughput_kbps": "throughput",
+    "throughput_mbps": "throughput",
     "atraso_medio_ms": "delay",
     "jitter_medio_ms": "jitter",
 }
@@ -183,9 +183,9 @@ def read_results() -> pd.DataFrame | None:
     except (OSError, pd.errors.ParserError) as exc:
         st.error(f"Nao foi possivel ler o CSV: {exc}")
         return None
-    if "throughput_mbps" in df.columns:
-        st.error("O CSV em data/raw/ foi gerado por uma versao antiga do simulador (PDR do OLSR, "
-                 "throughput e atraso/jitter calculados de forma incorreta). Rode a bateria novamente.")
+    if "seed" not in df.columns:
+        st.error("O CSV em data/raw/ foi gerado por uma versao antiga do simulador (sem a coluna seed "
+                 "e com metricas calculadas de outra forma). Rode a bateria novamente.")
         return None
     missing = [column for column in COLUNAS_OBRIGATORIAS if column not in df.columns]
     if missing:
@@ -294,7 +294,7 @@ def main():
         ns3_dir = st.text_input(ns3_label, ns3_default)
         n_nodes = st.number_input("Numero de nos", min_value=2, value=20, step=1)
         sim_time = st.number_input("Tempo de simulacao (s)", min_value=1.0, value=120.0, step=10.0)
-        n_runs = st.number_input("Repeticoes por combinacao", min_value=1, value=5, step=1)
+        n_runs = st.number_input("Repeticoes por combinacao", min_value=1, value=20, step=1)
         alcance = st.number_input("Alcance do radio (m)", min_value=1.0, value=250.0, step=10.0)
         workers = st.number_input("Processos simultaneos", min_value=1, value=4, step=1)
         st.info("O simulador atual usa 3 protocolos, 2 areas e 4 velocidades fixas. Total estimado: "

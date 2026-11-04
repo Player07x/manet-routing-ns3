@@ -1,121 +1,123 @@
 # MANET + ns-3 — Avaliação de Mobilidade e Roteamento (AODV × OLSR × DSDV)
 
-Trabalho da disciplina **Redes Móveis** (2026/2) — Bacharelado em Engenharia de Software, IFG Câmpus Inhumas. Avalia como diferentes níveis de mobilidade afetam o desempenho dos protocolos de roteamento **AODV**, **OLSR** e **DSDV** em uma MANET (*Mobile Ad hoc NETwork*), simulada no ns-3.
+Trabalho da disciplina **Redes Móveis** (2026/2) — Bacharelado em Engenharia de Software, IFG Câmpus Inhumas. Avalia como diferentes níveis de mobilidade afetam o desempenho dos protocolos de roteamento **AODV**, **OLSR** e **DSDV** em uma MANET (*Mobile Ad hoc NETwork*), simulada no ns-3. O artigo (modelo SBC) está em [`article/artigo.pdf`](article/artigo.pdf).
 
 ## Pergunta de pesquisa
 
 Como diferentes níveis de mobilidade afetam o desempenho dos protocolos AODV, OLSR e DSDV em uma rede MANET?
 
-## Ambiente
+## Ambiente usado no artigo
 
-- ns-3 **3.48**
-- Linux, g++ com suporte a C++17, CMake
-- Módulos ns-3 usados: `core`, `network`, `internet`, `applications`, `wifi`, `mobility`, `aodv`, `olsr`, `dsdv`, `flow-monitor`
+| Item | Versão |
+|---|---|
+| ns-3 | **3.48** (módulos `core`, `network`, `internet`, `applications`, `wifi`, `mobility`, `aodv`, `olsr`, `dsdv`, `flow-monitor`) |
+| Sistema | Ubuntu 26.04.1 LTS, x86_64 |
+| Compilador / build | g++ 15.2.0, CMake 4.2.3 (perfil de build `default` do ns-3) |
+| Python | 3.14.4, com as versões fixadas em `requirements.txt` (matplotlib 3.11.2, numpy 2.5.3, pandas 3.1.0, streamlit 1.66.1) |
+| Artigo | LaTeX (modelo SBC), compilado com Tectonic 0.17.0 ou no Overleaf |
+
+O ns-3 3.48 deve estar instalado e compilado (por padrão em `~/ns-3.48`); consulte o [tutorial oficial](https://www.nsnam.org/docs/release/3.48/tutorial/html/).
 
 ## Compilação
 
-Copie `src/manet-routing.cc` para a pasta `scratch/` de uma instalação do ns-3 3.48, depois:
+Os scripts de lote fazem isso automaticamente. Para compilar manualmente, copie `src/manet-routing.cc` para a pasta `scratch/` do ns-3 e execute:
 
 ```bash
-cd <caminho-do-ns-3.48>
-./ns3 build manet-routing
+cp src/manet-routing.cc ~/ns-3.48/scratch/
+cd ~/ns-3.48 && ./ns3 build manet-routing
 ```
 
 ## Execução
 
-### Bateria completa — forma recomendada (um comando só)
-
-```bash
-./scripts/run_batch.sh
-```
-
-Builda, roda as **3 protocolos × 2 áreas × 4 velocidades × 5 repetições = 120 execuções** em processos independentes e já grava o resultado em `data/raw/`. O padrão usa 4 processos simultâneos; ajuste com `WORKERS` conforme a capacidade da máquina:
+### Bateria completa do artigo (um comando só)
 
 ```bash
 WORKERS=8 ./scripts/run_batch.sh
 ```
 
-O paralelismo é feito por processos porque o `Simulator` do ns-3 mantém estado global dentro de cada processo e não é seguro executar várias simulações com `std::thread` no mesmo processo. Cada tarefa usa uma combinação de protocolo, área, velocidade e repetição, grava um CSV temporário próprio e só depois todos os resultados são combinados atomicamente no CSV final. As sementes continuam reprodutíveis (`seed=1`, `run=1..nRuns`).
+Compila e roda **3 protocolos × 2 áreas × 4 velocidades × 20 repetições = 480 execuções** de 120 s, com alcance de 250 m, seed 1 e tabelas ARP permanentes — exatamente a configuração dos resultados do artigo. `WORKERS` é o número de processos simultâneos (padrão 4); com 8 processos a bateria levou cerca de 7 minutos. O paralelismo é feito por processos porque o `Simulator` do ns-3 mantém estado global dentro de cada processo. Cada tarefa grava CSVs temporários próprios e só no fim eles são combinados em `data/raw/`. O script recusa rodar se já houver uma simulação `manet-routing` em andamento.
 
-Para executar diretamente e controlar mais parâmetros:
+Para controlar os parâmetros diretamente:
 
 ```bash
 python3 scripts/run_batch_parallel.py --ns3-dir "$HOME/ns-3.48" \
-  --workers 4 --nNodes 20 --simTime 120 --nRuns 5 --alcance 250
+  --workers 8 --nNodes 20 --simTime 120 --nRuns 20 --alcance 250 --seed 1 --arp permanente
 ```
 
-Para rodar em segundo plano, sobrevivendo ao fechamento do terminal:
+### Uma execução isolada
 
 ```bash
-WORKERS=4 nohup ./scripts/run_batch.sh > run_batch.log 2>&1 &
+cd ~/ns-3.48
+./ns3 run "scratch/manet-routing --protocolo=AODV --area=500 --velocidade=10 --run=3 --nRuns=1"
 ```
 
-O script recusa rodar se já houver uma simulação em andamento, para evitar dois processos escrevendo no mesmo CSV ao mesmo tempo.
-
-### Bateria completa — passo a passo manual (modo sequencial)
+Para inspecionar o atraso de cada pacote (usado no artigo para mostrar a convergência inicial do DSDV):
 
 ```bash
-cd <caminho-do-ns-3.48>
-nohup ./ns3 run scratch/manet-routing > bateria.log 2>&1 &
-# depois de terminar:
-cp <caminho-do-ns-3.48>/resultados-aodv-olsr-dsdv.csv <caminho-deste-repo>/data/raw/
+./ns3 run "scratch/manet-routing --protocolo=DSDV --area=500 --velocidade=1 --run=9 --nRuns=1 --atrasosPacotes=pacotes.csv"
 ```
 
-### Execução reduzida (teste rápido)
+Sem os filtros (`--protocolo`, `--area`, `--velocidade`, `--run`) o programa roda a matriz inteira sequencialmente, com `--nRuns` repetições.
 
-```bash
-./ns3 run "scratch/manet-routing --simTime=20 --nRuns=1"
-```
+### Parâmetros do simulador
 
-### Parâmetros disponíveis
-
-| Parâmetro | Padrão | Descrição |
-|---|---|---|
-| `--nNodes` | 20 | Número de nós |
-| `--simTime` | 120 | Tempo de simulação (s) |
-| `--nRuns` | 5 | Repetições por combinação |
-| `--alcance` | 250 | Alcance do rádio em metros (modelo de disco) |
+| Parâmetro | Padrão | Unidade | Significado |
+|---|---|---|---|
+| `--nNodes` | 20 | nós | Número de nós |
+| `--simTime` | 120 | s | Tempo total de simulação |
+| `--nRuns` | 5 | — | Repetições por combinação (o artigo usa 20) |
+| `--alcance` | 250 | m | Alcance do rádio (modelo de disco) |
+| `--seed` | 1 | — | Seed mestre (`RngSeedManager::SetSeed`) |
+| `--arp` | `permanente` | — | `permanente`: tabelas ARP pré-preenchidas; `dinamico`: ARP padrão do ns-3 (ver Cenário) |
+| `--protocolo` | todos | — | `AODV`, `OLSR` ou `DSDV` |
+| `--area` | todas | m | Lado da área quadrada: `500` ou `750` (0 = todas) |
+| `--velocidade` | todas | m/s | `1`, `5`, `10` ou `20` (0 = todas) |
+| `--run` | todos | — | Executa só esta repetição (`RngSeedManager::SetRun`) |
+| `--output` | `resultados-aodv-olsr-dsdv.csv` | — | CSV com uma linha por execução |
+| `--outputFluxos` | `resultados-por-fluxo.csv` | — | CSV com uma linha por fluxo |
+| `--atrasosPacotes` | vazio | — | Opcional: CSV com o atraso de cada pacote recebido (diagnóstico; não altera os resultados) |
 
 ## Cenário
 
 | Parâmetro | Valor |
 |---|---|
-| Tecnologia | IEEE 802.11b em modo Ad Hoc |
-| Rádio | Alcance fixo de 250 m (`RangePropagationLossModel`), valor clássico da literatura de MANET. O canal padrão do ns-3.48 (802.11ax, LogDistance) limitaria o alcance a ~51 m e deixaria o cenário de 500×500 m particionado |
+| Tecnologia | IEEE 802.11b em modo Ad Hoc (`AdhocWifiMac`, `IdealWifiManager`) |
+| Canal | `ConstantSpeedPropagationDelayModel` + `RangePropagationLossModel` com alcance fixo de 250 m (o canal padrão do ns-3.48, 802.11ax com LogDistance, alcançaria só ~51 m e deixaria a área de 500×500 m particionada) |
+| ARP | Tabelas pré-preenchidas com entradas **permanentes** (IP → MAC de todos os nós). No ARP padrão do ns-3.48 as retransmissões de requisição saem a cada 1 s exato, sem jitter; requisições de vizinhos iniciadas no mesmo instante colidem em todas as tentativas e o vizinho fica "morto" por 100 s, bloqueando fluxos inteiros. O `NeighborCacheHelper` do ns-3 não serve: suas entradas `AutoGenerated` são ignoradas pelo AODV, que deixa de detectar enlaces quebrados. O comportamento original é reproduzível com `--arp=dinamico` |
 | Nós | 20 |
-| Área | 500×500 m (cenário-base) e 250×250 m (variável experimental extra do grupo — densidade de nós) |
-| Mobilidade | `RandomWaypointMobilityModel` |
-| Velocidades | 1, 5, 10, 20 m/s |
-| Protocolos | AODV, OLSR, DSDV |
-| Aplicação | UDP (echo), 4 fluxos simultâneos de 512 B a 1 pacote/s por fluxo, de 10 s até o fim da simulação; cada fluxo começa com um atraso aleatório de até 1 s para os quatro não transmitirem sempre no mesmo instante |
-| Repetições | 5 por combinação |
-| Aleatoriedade | Seed mestre fixa (`1`), número de *run* variável a cada repetição — determinístico e reprodutível |
+| Área | 500×500 m (cenário-base) e 750×750 m (extensão do grupo: área maior, menor densidade) |
+| Mobilidade | `RandomWaypointMobilityModel`, posições iniciais e destinos uniformes na área, velocidade constante, pausa de 1 s |
+| Velocidades | 1, 5, 10 e 20 m/s |
+| Protocolos | AODV, OLSR, DSDV (parâmetros padrão do ns-3.48) |
+| Aplicação | UDP (`UdpEchoClient`/`UdpEchoServer`), 4 fluxos simultâneos (nó *i* → nó 19−*i*, *i* = 0…3), 512 B de dados a 1 pacote/s por fluxo, de 10 s até o fim; cada fluxo começa com atraso aleatório de até 1 s (sorteado com stream fixo, igual para os três protocolos) para os quatro não transmitirem sempre no mesmo instante |
+| Tempo de simulação | 120 s |
+| Repetições | 20 por combinação (*run* 1 a 20) |
+| Aleatoriedade | Seed mestre fixa `1` e *run* = número da repetição. Para a mesma repetição, as trajetórias dos nós são idênticas nos três protocolos |
 
-> Os resultados com área = 500 m são o experimento-base (comparação oficial entre os 3 protocolos); os resultados com área = 250 m são a extensão experimental do grupo.
+> Área = 500 m é o experimento-base (matriz exigida); área = 750 m é a extensão experimental do grupo, separada da matriz-base.
 
-## Métricas coletadas
+## Métricas
 
 Calculadas a partir dos 4 fluxos UDP da aplicação (as respostas do echo não entram):
 
-- **PDR (%)** — pacotes recebidos (`FlowMonitor`) ÷ pacotes gerados pela aplicação (trace `Tx` do cliente). O denominador é o mesmo nos três protocolos; o `txPackets` do `FlowMonitor` não serve, porque o OLSR descarta no socket os pacotes sem rota antes de eles chegarem à camada IP.
-- **Throughput (kbps)** — bytes recebidos (com cabeçalhos IP/UDP) ÷ janela de tráfego (de 10 s até `simTime`). A carga ofertada é ≈ 17,3 kbps.
-- **Atraso médio (ms)** e **jitter médio (ms)** — `delaySum` e `jitterSum` do `FlowMonitor` divididos pelo número de amostras. Execuções sem amostras gravam `nan` e ficam fora das médias.
+- **PDR (%)** = pacotes recebidos ÷ pacotes transmitidos pela aplicação × 100. O denominador vem do trace `Tx` do `UdpEchoClient` e é o mesmo nos três protocolos. O `txPackets` do `FlowMonitor` não serve como denominador: o OLSR descarta no socket os pacotes sem rota antes de eles chegarem à camada IP (essa diferença aparece na coluna `pacotes_tx_ip` do CSV por fluxo).
+- **Throughput (Mbps)** = bytes recebidos × 8 ÷ duração útil. A **duração útil** é de 10 s (início dos clientes) até `simTime`, ou seja, 110 s. Os bytes incluem os cabeçalhos IP e UDP (540 B por pacote), então a carga ofertada é 4 × 540 × 8 bit/s ≈ 0,01728 Mbps.
+- **Atraso médio (ms)** = `delaySum` ÷ pacotes recebidos.
+- **Jitter médio (ms)** = `jitterSum` ÷ (pacotes recebidos − 1), aplicado a cada fluxo. Na linha da execução, a soma dos `jitterSum` dos quatro fluxos é dividida pela soma de (recebidos − 1) de cada fluxo.
+- Execuções ou fluxos sem amostras gravam `nan` e ficam fora das médias.
+- Auxiliares (para a discussão): `atraso_p50_ms` e `atraso_p95_ms` (mediana e percentil 95 do atraso, pelo histograma do `FlowMonitor` com classes de 0,1 ms), `pacotes_tx_ip` (pacotes que chegaram à camada IP na origem; a diferença para `pacotes_enviados` são descartes na origem por falta de rota) e `descartes_mac` (quadros de dados descartados pelo MAC ao esgotar as retransmissões, em geral porque o próximo salto saiu do alcance; pode incluir raros quadros cujo ACK se perdeu, embora o dado tenha chegado).
 
 ## Saídas
 
-A execução grava `resultados-aodv-olsr-dsdv.csv` na pasta onde o `./ns3 run` foi executado (raiz da instalação do ns-3) — **não** dentro deste repositório, já que o simulador só roda de dentro de uma árvore ns-3 instalada. Uma linha por execução:
-
-```
-protocolo,area_m,velocidade_m_s,execucao,pacotes_enviados,pacotes_recebidos,pdr_percent,atraso_medio_ms,throughput_kbps,jitter_medio_ms
-```
-
-`./scripts/run_batch.sh` já copia o CSV para `data/raw/` automaticamente. Depois disso, versione:
-
-```bash
-git add data/raw/resultados-aodv-olsr-dsdv.csv
-git commit -m "Adiciona resultados da bateria completa (120 execucoes)"
-git push
-```
+| Arquivo | Conteúdo |
+|---|---|
+| `data/raw/resultados-aodv-olsr-dsdv.csv` | Uma linha por execução: `protocolo,area_m,velocidade_m_s,seed,execucao,pacotes_enviados,pacotes_recebidos,pdr_percent,atraso_medio_ms,throughput_mbps,jitter_medio_ms,atraso_p50_ms,atraso_p95_ms,pacotes_tx_ip,descartes_mac` |
+| `data/raw/resultados-por-fluxo.csv` | Uma linha por fluxo: `protocolo,area_m,velocidade_m_s,seed,execucao,fluxo,origem,destino,pacotes_enviados,pacotes_tx_ip,pacotes_recebidos,pacotes_perdidos,bytes_recebidos,pdr_percent,atraso_medio_ms,throughput_mbps,jitter_medio_ms,atraso_p50_ms,atraso_p95_ms,descartes_mac` |
+| `data/raw/execucoes.csv` | Log de cada execução: parâmetros, versão do ns-3, commit do repositório, início, fim e duração |
+| `data/raw/metadados.json` | Ambiente (sistema, compilador, Python), commit e parâmetros da bateria |
+| `data/processed/resultados-agregados.csv` | Média, desvio-padrão, meia-largura do IC 95% (t de Student) e *n* das quatro métricas, mais média e IC das métricas auxiliares (percentis do atraso, perda no MAC e perda na origem, em % dos pacotes enviados), por protocolo × área × velocidade |
+| `figures/*.png` | Os 4 gráficos obrigatórios × 2 cenários (gerados por `analyze.py`) |
+| `article/figuras/*.pdf` | Figuras do artigo (geradas por `figuras_artigo.py`) |
 
 ## Análise e gráficos
 
@@ -123,30 +125,32 @@ git push
 python3 -m venv .venv && source .venv/bin/activate   # uma vez só
 pip install -r requirements.txt                       # uma vez só
 python3 scripts/analyze.py
+python3 scripts/figuras_artigo.py
 ```
+
+`analyze.py` valida os dados antes de gerar os gráficos: PDR fora de 0–100%, execuções sem pacote enviado, quantidade de repetições diferente de 20 (ajuste com `--expected-runs`; `0` desativa), `pacotes_enviados` diferente entre protocolos na mesma repetição, fluxos cuja soma não bate com o total da execução e fluxos sem nenhum pacote recebido. CSVs gerados por versões antigas do simulador (sem a coluna `seed`) são recusados. `figuras_artigo.py` gera as figuras do artigo (painéis 2×2) em `article/figuras/`.
 
 ### Interface visual opcional
 
-Para executar a simulação, acompanhar o log, visualizar os resultados e exportar CSVs/ZIP pelo navegador:
-
 ```bash
-pip install -r requirements.txt
 streamlit run scripts/dashboard.py
 ```
 
-Execute esses comandos a partir da pasta do repositório. No Windows, o dashboard chama o ns-3 dentro do WSL; no Ubuntu, ele executa o ns-3 diretamente no sistema local. A interface é uma camada separada: o `scripts/analyze.py` e os comandos tradicionais continuam funcionando sem ela. A simulação usa os parâmetros configuráveis de nós, tempo e repetições e mantém o cenário experimental atual (AODV, OLSR e DSDV; áreas 500/250 m; velocidades 1/5/10/20 m/s). No Ubuntu, informe a pasta local do ns-3 (por padrão, `~/ns-3.48`); no Windows, informe a pasta do ns-3 dentro do WSL.
+Executa a bateria, acompanha o log e mostra/exporta os resultados pelo navegador (no Windows, chama o ns-3 dentro do WSL). É uma camada separada: `analyze.py` e os scripts de lote funcionam sem ela.
 
-O dashboard permite escolher o número de processos simultâneos, interromper a bateria pelo botão **Interromper simulação** e acompanha automaticamente o estado a cada dois segundos.
+## Artigo
 
-Lê `data/raw/resultados-aodv-olsr-dsdv.csv`, valida (PDR fora de 0–100%, execuções sem pacote enviado, `pacotes_enviados` diferente entre protocolos na mesma execução, contagem de repetições diferente de 5), salva as estatísticas agregadas (média, desvio padrão, meia-largura do intervalo de confiança de 95% pela t de Student e número de amostras válidas, por protocolo × área × velocidade) em `data/processed/resultados-agregados.csv`, e gera em `figures/` os 4 gráficos obrigatórios — PDR, throughput, delay e jitter × velocidade, uma série por protocolo com barras de erro de IC 95% — separados entre cenário-base (500 m) e extensão do grupo (250 m). CSVs gerados pela versão antiga do simulador (coluna `throughput_mbps`) são recusados, porque têm o PDR do OLSR, o throughput e o atraso/jitter calculados de forma incorreta.
-
-Se a bateria usar outra quantidade de repetições, informe-a na validação, por exemplo:
+O código-fonte LaTeX está em `article/` (`artigo.tex`, `referencias.bib`, `sbc-template.sty`). Para gerar o PDF localmente:
 
 ```bash
-python3 scripts/analyze.py --expected-runs 100
+cd article && tectonic artigo.tex
 ```
 
-O valor `--expected-runs 0` desativa essa validação específica.
+Também pode ser compilado no Overleaf (envie a pasta `article/` inteira; compilador XeLaTeX ou pdfLaTeX).
+
+## Rastreabilidade
+
+A versão do código, dos dados e do PDF citada no artigo é a *tag* [`artigo-v1`](https://github.com/Player07x/manet-routing-ns3/tree/artigo-v1) (`git checkout artigo-v1` depois de clonar). Os resultados do artigo correspondem ao commit registrado em `data/raw/metadados.json` (campo `commit_repositorio`) e em cada linha de `data/raw/execucoes.csv`. Para reproduzir: clone o repositório, instale o ns-3 3.48, rode `WORKERS=8 ./scripts/run_batch.sh` e depois os dois scripts de análise. Como seed e *run* são fixos, os CSVs gerados são idênticos aos versionados (exceto os horários do log).
 
 ## Estrutura do repositório
 
@@ -155,23 +159,19 @@ manet-routing-ns3/
 ├── README.md
 ├── requirements.txt
 ├── src/
-│   └── manet-routing.cc
+│   └── manet-routing.cc         — simulação (um programa para os três protocolos)
 ├── scripts/
-│   ├── run_batch.sh      — builda, roda a bateria completa e copia o CSV para data/raw/
-│   └── analyze.py        — valida, agrega e gera os gráficos a partir de data/raw/
+│   ├── run_batch.sh             — bateria completa do artigo (chama run_batch_parallel.py)
+│   ├── run_batch_parallel.py    — executa as combinações em paralelo e grava data/raw/
+│   ├── analyze.py               — valida, agrega e gera os gráficos de figures/
+│   ├── figuras_artigo.py        — gera as figuras do artigo em article/figuras/
+│   └── dashboard.py             — interface visual opcional (Streamlit)
 ├── data/
-│   ├── raw/               — CSV bruto (pendente até rodar a bateria)
-│   └── processed/         — estatísticas agregadas (gerado por analyze.py)
-├── figures/               — gráficos obrigatórios (gerado por analyze.py)
-└── article/               — artigo final em PDF, modelo SBC (pendente)
+│   ├── raw/                     — CSVs brutos, log das execuções e metadados
+│   └── processed/               — estatísticas agregadas
+├── figures/                     — gráficos obrigatórios
+└── article/                     — artigo (LaTeX, modelo SBC) e PDF
 ```
-
-## Status
-
-- [x] Simulação (AODV, OLSR, DSDV) implementada e testada
-- [ ] Bateria completa de execuções (120 runs)
-- [ ] Análise estatística e gráficos
-- [ ] Artigo científico
 
 ## Grupo
 

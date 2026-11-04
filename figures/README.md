@@ -1,10 +1,8 @@
 # figures/
 
-Os 4 gráficos obrigatórios entram aqui, um por métrica (sempre uma série por protocolo, com barras de erro de IC 95% quando apresentar médias de repetições):
+Os 4 gráficos obrigatórios (PDR, throughput, atraso e jitter × velocidade), uma série por protocolo, com média de 20 repetições e barras de erro de IC 95%, para cada cenário:
 
-- PDR × velocidade
-- Throughput × velocidade
-- Delay × velocidade
-- Jitter × velocidade
+- `*_area500_base.png` — cenário-base, 500 × 500 m;
+- `*_area750_extensao.png` — extensão do grupo, 750 × 750 m.
 
-Pendente até os dados de `../data/` existirem.
+Gerados por `python3 scripts/analyze.py`. A figura do artigo (os oito painéis juntos) fica em `../article/figuras/`.

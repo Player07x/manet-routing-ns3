@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Processa o CSV bruto da bateria de simulacoes: valida, agrega
+"""Processa os CSVs brutos da bateria de simulacoes: valida, agrega
 estatisticas (media, desvio e intervalo de confianca de 95% por
 protocolo x area x velocidade) e gera os 4 graficos obrigatorios (PDR,
 throughput, delay, jitter x velocidade), separando o cenario-base
-(area=500m) da extensao do grupo (area=250m).
+(area=500m) da extensao do grupo (area=750m).
 
 Uso:
     python3 scripts/analyze.py
-    python3 scripts/analyze.py --input /outro/caminho/resultados.csv
+    python3 scripts/analyze.py --input /outro/caminho/resultados.csv --input-fluxos /outro/caminho/fluxos.csv
 """
 import argparse
 import csv
@@ -24,23 +24,31 @@ import matplotlib.pyplot as plt
 
 REPO_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_RAW_CSV = REPO_DIR / "data" / "raw" / "resultados-aodv-olsr-dsdv.csv"
+DEFAULT_FLOWS_CSV = REPO_DIR / "data" / "raw" / "resultados-por-fluxo.csv"
 PROCESSED_DIR = REPO_DIR / "data" / "processed"
 FIGURES_DIR = REPO_DIR / "figures"
 
 # Uma metrica -> (rotulo do eixo Y, nome base do arquivo de figura)
 METRICAS = {
     "pdr_percent": ("PDR (%)", "pdr_vs_velocidade"),
-    "throughput_kbps": ("Throughput (kbps)", "throughput_vs_velocidade"),
+    "throughput_mbps": ("Throughput (Mbps)", "throughput_vs_velocidade"),
     "atraso_medio_ms": ("Atraso médio (ms)", "delay_vs_velocidade"),
     "jitter_medio_ms": ("Jitter médio (ms)", "jitter_vs_velocidade"),
 }
 COLUNAS_OBRIGATORIAS = [
-    "protocolo", "area_m", "velocidade_m_s", "execucao",
+    "protocolo", "area_m", "velocidade_m_s", "seed", "execucao",
     "pacotes_enviados", "pacotes_recebidos", *METRICAS,
+    "atraso_p50_ms", "atraso_p95_ms", "pacotes_tx_ip", "descartes_mac",
 ]
+FLUXOS_POR_EXECUCAO = 4
 
 PROTOCOLOS = ["AODV", "OLSR", "DSDV"]
-REPETICOES_ESPERADAS = 5
+# 500 m: cenario-base exigido; 750 m: extensao do grupo
+CENARIOS = [
+    (500.0, "area500_base", "cenário-base, 500×500 m"),
+    (750.0, "area750_extensao", "extensão do grupo, 750×750 m"),
+]
+REPETICOES_ESPERADAS = 20
 
 # Paleta Okabe-Ito (seguro para daltonismo), uma cor fixa por protocolo
 CORES = {"AODV": "#0072B2", "OLSR": "#E69F00", "DSDV": "#009E73"}
@@ -69,18 +77,16 @@ def carregar_dados(caminho):
     if not caminho.exists():
         sys.exit(
             f"Nao encontrei {caminho}.\n"
-            "Rode a bateria completa (./scripts/run_batch.sh) e confira se o CSV "
-            "foi copiado para data/raw/ antes de rodar esta analise."
+            "Rode a bateria completa (./scripts/run_batch.sh) antes de rodar esta analise."
         )
     with open(caminho, newline="") as f:
         leitor = csv.DictReader(f)
         linhas = list(leitor)
         colunas = leitor.fieldnames or []
-    if "throughput_mbps" in colunas:
+    if "seed" not in colunas:
         sys.exit(
-            f"{caminho} foi gerado por uma versao antiga do simulador: o PDR do OLSR usa como "
-            "denominador so os pacotes que acharam rota, o throughput e dividido pelo tempo "
-            "errado e execucoes sem entrega gravam atraso/jitter = 0. Rode a bateria novamente."
+            f"{caminho} foi gerado por uma versao antiga do simulador (sem a coluna seed e com "
+            "metricas calculadas de outra forma). Rode a bateria novamente."
         )
     faltando = [c for c in COLUNAS_OBRIGATORIAS if c not in colunas]
     if faltando:
@@ -88,7 +94,19 @@ def carregar_dados(caminho):
     return linhas
 
 
-def validar(linhas, repeticoes_esperadas=REPETICOES_ESPERADAS):
+def carregar_fluxos(caminho):
+    if not caminho.exists():
+        print(f"Aviso: {caminho} nao existe; a validacao por fluxo foi pulada.")
+        return None
+    with open(caminho, newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def chave_execucao(r):
+    return (r["protocolo"], r["area_m"], r["velocidade_m_s"], r["seed"], r["execucao"])
+
+
+def validar(linhas, fluxos, repeticoes_esperadas=REPETICOES_ESPERADAS):
     problemas = []
     contagem = defaultdict(int)
     enviados = defaultdict(set)
@@ -118,6 +136,22 @@ def validar(linhas, repeticoes_esperadas=REPETICOES_ESPERADAS):
         if repeticoes_esperadas is not None and n != repeticoes_esperadas:
             problemas.append(f"{chave} tem {n} execucoes (esperado {repeticoes_esperadas})")
 
+    fluxos_sem_recepcao = []
+    if fluxos is not None:
+        # Os fluxos de cada execucao precisam somar exatamente os totais da execucao
+        por_execucao = defaultdict(list)
+        for f in fluxos:
+            por_execucao[chave_execucao(f)].append(f)
+        for r in linhas:
+            grupo = por_execucao.get(chave_execucao(r), [])
+            if len(grupo) != FLUXOS_POR_EXECUCAO:
+                problemas.append(f"{chave_execucao(r)} tem {len(grupo)} fluxos (esperado {FLUXOS_POR_EXECUCAO})")
+                continue
+            for coluna in ("pacotes_enviados", "pacotes_recebidos"):
+                if sum(int(f[coluna]) for f in grupo) != int(r[coluna]):
+                    problemas.append(f"{chave_execucao(r)}: soma de {coluna} dos fluxos difere do total")
+        fluxos_sem_recepcao = [f for f in fluxos if int(f["pacotes_recebidos"]) == 0]
+
     if problemas:
         print(f"Avisos de validacao ({len(problemas)}):")
         for p in problemas:
@@ -127,6 +161,13 @@ def validar(linhas, repeticoes_esperadas=REPETICOES_ESPERADAS):
     if sem_entrega:
         print(f"{sem_entrega} execucoes sem nenhum pacote entregue: atraso e jitter ficam vazios "
               "(nan) e nao entram nas medias.")
+    if fluxos_sem_recepcao:
+        print(f"{len(fluxos_sem_recepcao)} fluxos sem nenhum pacote recebido:")
+        for f in fluxos_sem_recepcao:
+            print(f"  - {f['protocolo']} area={f['area_m']} vel={f['velocidade_m_s']} "
+                  f"execucao={f['execucao']} fluxo={f['fluxo']} ({f['origem']} -> {f['destino']})")
+    elif fluxos is not None:
+        print("Todos os fluxos receberam pelo menos um pacote.")
     return linhas
 
 
@@ -157,13 +198,27 @@ def agregar(linhas):
             linha[f"{col}_desvio"] = desvio
             linha[f"{col}_ic95"] = ic95
             linha[f"{col}_n"] = n
+        # Metricas auxiliares da discussao (sem grafico): percentis do atraso e causas de perda
+        auxiliares = {
+            "atraso_p50_ms": [float(r["atraso_p50_ms"]) for r in grupo],
+            "atraso_p95_ms": [float(r["atraso_p95_ms"]) for r in grupo],
+            "perda_mac_percent": [100.0 * int(r["descartes_mac"]) / int(r["pacotes_enviados"]) for r in grupo],
+            "perda_origem_percent": [
+                100.0 * (int(r["pacotes_enviados"]) - int(r["pacotes_tx_ip"])) / int(r["pacotes_enviados"])
+                for r in grupo
+            ],
+        }
+        for col, valores in auxiliares.items():
+            media, desvio, ic95, n = resumir(valores)
+            linha[f"{col}_media"] = media
+            linha[f"{col}_ic95"] = ic95
         # Com pacotes de tamanho fixo, throughput / PDR e a carga ofertada pela aplicacao
         cargas = [
-            float(r["throughput_kbps"]) / (float(r["pdr_percent"]) / 100.0)
+            float(r["throughput_mbps"]) / (float(r["pdr_percent"]) / 100.0)
             for r in grupo
             if float(r["pdr_percent"]) > 0
         ]
-        linha["carga_ofertada_kbps"] = mean(cargas) if cargas else math.nan
+        linha["carga_ofertada_mbps"] = mean(cargas) if cargas else math.nan
         agregados.append(linha)
     return agregados
 
@@ -179,10 +234,9 @@ def salvar_processado(agregados):
     print(f"Estatisticas agregadas salvas em {destino}")
 
 
-def criar_figura(agregados, area_alvo, coluna, rotulo_area):
-    rotulo_y = METRICAS[coluna][0]
+def desenhar_metrica(ax, agregados, area_alvo, coluna, tamanho_marcador=7):
+    """Desenha uma serie por protocolo (media e IC 95%) no eixo ax."""
     dados_area = [a for a in agregados if a["area_m"] == area_alvo]
-    fig, ax = plt.subplots(figsize=(7, 5.4), layout="constrained")
     topo = 0.0
     for protocolo in PROTOCOLOS:
         pontos = sorted(
@@ -208,28 +262,34 @@ def criar_figura(agregados, area_alvo, coluna, rotulo_area):
         topo = max([topo] + [v + e for v, e in zip(y, erro_superior) if not math.isnan(v)])
         ax.errorbar(
             x, y, yerr=[erro_inferior, erro_superior],
-            marker=MARCADORES[protocolo], markersize=7, linewidth=2,
+            marker=MARCADORES[protocolo], markersize=tamanho_marcador, linewidth=2,
             capsize=4, label=protocolo, color=CORES[protocolo],
         )
 
-    if coluna == "throughput_kbps":
-        cargas = [a["carga_ofertada_kbps"] for a in dados_area if not math.isnan(a["carga_ofertada_kbps"])]
+    if coluna == "throughput_mbps":
+        cargas = [a["carga_ofertada_mbps"] for a in dados_area if not math.isnan(a["carga_ofertada_mbps"])]
         if cargas:
             carga = mean(cargas)
             ax.axhline(carga, color="0.4", linestyle="--", linewidth=1.2, label="Carga ofertada")
             topo = max(topo, carga)
+        ax.ticklabel_format(axis="y", style="plain", useOffset=False)
 
     velocidades = sorted({a["velocidade_m_s"] for a in dados_area})
     ax.set_xticks(velocidades, [f"{v:g}" for v in velocidades])
     ax.set_xlabel("Velocidade (m/s)")
-    ax.set_ylabel(rotulo_y)
-    ax.set_title(f"{rotulo_y} × velocidade — {rotulo_area}")
+    ax.set_ylabel(METRICAS[coluna][0])
     # Margem acima do maior valor para os marcadores nao ficarem cortados na borda
     if coluna == "pdr_percent":
         ax.set_ylim(0, 105)
     else:
         ax.set_ylim(0, topo * 1.12 if topo > 0 else 1.0)
     ax.grid(True, alpha=0.3)
+
+
+def criar_figura(agregados, area_alvo, coluna, rotulo_area):
+    fig, ax = plt.subplots(figsize=(7, 5.4), layout="constrained")
+    desenhar_metrica(ax, agregados, area_alvo, coluna)
+    ax.set_title(f"{METRICAS[coluna][0]} × velocidade — {rotulo_area}")
     # Legenda fora da area do grafico, para nunca cobrir pontos ou barras de erro
     fig.legend(loc="outside lower center", ncol=4, title="Barras de erro: IC 95%", frameon=False)
     return fig
@@ -251,7 +311,8 @@ def gerar_graficos(agregados, area_alvo, sufixo, rotulo_area):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, default=DEFAULT_RAW_CSV, help="Caminho do CSV bruto")
+    parser.add_argument("--input", type=Path, default=DEFAULT_RAW_CSV, help="CSV bruto (uma linha por execucao)")
+    parser.add_argument("--input-fluxos", type=Path, default=DEFAULT_FLOWS_CSV, help="CSV bruto por fluxo")
     parser.add_argument(
         "--expected-runs", type=int, default=REPETICOES_ESPERADAS,
         help="Numero esperado de repeticoes por combinacao (use 0 para nao validar)",
@@ -259,12 +320,13 @@ def main():
     args = parser.parse_args()
 
     linhas = carregar_dados(args.input)
+    fluxos = carregar_fluxos(args.input_fluxos)
     repeticoes_esperadas = args.expected_runs if args.expected_runs > 0 else None
-    linhas = validar(linhas, repeticoes_esperadas)
+    linhas = validar(linhas, fluxos, repeticoes_esperadas)
     agregados = agregar(linhas)
     salvar_processado(agregados)
-    gerar_graficos(agregados, area_alvo=500.0, sufixo="area500_base", rotulo_area="cenário-base, 500×500 m")
-    gerar_graficos(agregados, area_alvo=250.0, sufixo="area250_extensao", rotulo_area="extensão do grupo, 250×250 m")
+    for area, sufixo, rotulo in CENARIOS:
+        gerar_graficos(agregados, area_alvo=area, sufixo=sufixo, rotulo_area=rotulo)
 
 
 if __name__ == "__main__":

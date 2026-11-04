@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builda, roda a bateria completa (120 execucoes) em paralelo e copia o
-# resultado para dentro do repositorio, em data/raw/.
+# Builda e roda, em paralelo, a bateria completa usada no artigo
+# (3 protocolos x 2 areas x 4 velocidades x 20 repeticoes = 480 execucoes,
+# 120 s cada, alcance de 250 m, seed 1, ARP permanente) e grava os resultados em data/raw/.
 #
 # Uso:
 #   ./scripts/run_batch.sh
@@ -15,6 +16,11 @@ set -euo pipefail
 NS3_DIR="${NS3_DIR:-$HOME/ns-3.48}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKERS="${WORKERS:-4}"
+SIM_TIME=120
+N_RUNS=20
+ALCANCE=250
+SEED=1
+ARP=permanente
 
 if [ ! -x "$NS3_DIR/ns3" ]; then
     echo "Nao encontrei uma instalacao do ns-3 em $NS3_DIR (defina NS3_DIR)." >&2
@@ -26,8 +32,9 @@ if pgrep -f "build/scratch/.*manet-routing" > /dev/null 2>&1; then
     exit 1
 fi
 
-echo "Rodando a bateria completa em $WORKERS processos (3 protocolos x 2 areas x 4 velocidades x 5 repeticoes = 120 execucoes)..."
-python3 "$REPO_DIR/scripts/run_batch_parallel.py" --ns3-dir "$NS3_DIR" --workers "$WORKERS"
+echo "Rodando a bateria completa em $WORKERS processos (3 protocolos x 2 areas x 4 velocidades x $N_RUNS repeticoes, ${SIM_TIME} s)..."
+python3 "$REPO_DIR/scripts/run_batch_parallel.py" --ns3-dir "$NS3_DIR" --workers "$WORKERS" \
+    --simTime "$SIM_TIME" --nRuns "$N_RUNS" --alcance "$ALCANCE" --seed "$SEED" --arp "$ARP"
 
-echo "Pronto: $REPO_DIR/data/raw/resultados-aodv-olsr-dsdv.csv"
+echo "Pronto: resultados em $REPO_DIR/data/raw/"
 echo "Proximo passo: python3 scripts/analyze.py"

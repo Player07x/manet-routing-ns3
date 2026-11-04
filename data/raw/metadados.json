@@ -1,0 +1,34 @@
+{
+  "inicio_utc": "2026-11-04T01:33:34Z",
+  "fim_utc": "2026-11-04T01:40:32Z",
+  "commit_repositorio": "6d7ce0adcfddb008f180ee9f5e8890c58803d6e8+alteracoes-locais",
+  "versao_ns3": "3.48",
+  "compilador": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
+  "sistema": "Ubuntu 26.04.1 LTS",
+  "kernel": "7.0.0-42-generic",
+  "python": "3.14.4",
+  "parametros": {
+    "nNodes": 20,
+    "simTime_s": 120.0,
+    "nRuns": 20,
+    "alcance_m": 250.0,
+    "seed": 1,
+    "arp": "permanente",
+    "protocolos": [
+      "AODV",
+      "OLSR",
+      "DSDV"
+    ],
+    "areas_m": [
+      500.0,
+      750.0
+    ],
+    "velocidades_m_s": [
+      1.0,
+      5.0,
+      10.0,
+      20.0
+    ]
+  },
+  "execucoes": 480
+}
