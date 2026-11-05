@@ -11,9 +11,9 @@ Como diferentes níveis de mobilidade afetam o desempenho dos protocolos AODV, O
 | Item | Versão |
 |---|---|
 | ns-3 | **3.48** (módulos `core`, `network`, `internet`, `applications`, `wifi`, `mobility`, `aodv`, `olsr`, `dsdv`, `flow-monitor`) |
-| Sistema | Ubuntu 26.04.1 LTS, x86_64 |
-| Compilador / build | g++ 15.2.0, CMake 4.2.3 (perfil de build `default` do ns-3) |
-| Python | 3.14.4, com as versões fixadas em `requirements.txt` (matplotlib 3.11.2, numpy 2.5.3, pandas 3.1.0, streamlit 1.66.1) |
+| Sistema | Ubuntu 24.04.5 LTS no WSL 2 (Windows 11), x86_64 |
+| Compilador / build | g++ 13.3.0 (perfil de build `default` do ns-3) |
+| Python | 3.12.3 na bateria (WSL); análise e gráficos com Python 3.14.5 no Windows (matplotlib 3.11.2, numpy 2.5.4, pandas 3.1.1; `requirements.txt` fixa as versões de referência) |
 | Artigo | LaTeX (modelo SBC), compilado com Tectonic 0.17.0 ou no Overleaf |
 
 O ns-3 3.48 deve estar instalado e compilado (por padrão em `~/ns-3.48`); consulte o [tutorial oficial](https://www.nsnam.org/docs/release/3.48/tutorial/html/).
@@ -35,13 +35,13 @@ cd ~/ns-3.48 && ./ns3 build manet-routing
 WORKERS=8 ./scripts/run_batch.sh
 ```
 
-Compila e roda **3 protocolos × 2 áreas × 4 velocidades × 20 repetições = 480 execuções** de 120 s, com alcance de 250 m, seed 1 e tabelas ARP permanentes — exatamente a configuração dos resultados do artigo. `WORKERS` é o número de processos simultâneos (padrão 4); com 8 processos a bateria levou cerca de 7 minutos. O paralelismo é feito por processos porque o `Simulator` do ns-3 mantém estado global dentro de cada processo. Cada tarefa grava CSVs temporários próprios e só no fim eles são combinados em `data/raw/`. O script recusa rodar se já houver uma simulação `manet-routing` em andamento.
+Compila e roda **3 protocolos × 2 áreas × 4 velocidades × 100 repetições = 2.400 execuções** de 120 s, com alcance de 250 m, seed 1 e tabelas ARP permanentes — exatamente a configuração dos resultados do artigo. `WORKERS` é o número de processos simultâneos (padrão 4); a bateria do artigo levou cerca de 53 minutos. O paralelismo é feito por processos porque o `Simulator` do ns-3 mantém estado global dentro de cada processo. Cada tarefa grava CSVs temporários próprios e só no fim eles são combinados em `data/raw/`. O script recusa rodar se já houver uma simulação `manet-routing` em andamento.
 
 Para controlar os parâmetros diretamente:
 
 ```bash
 python3 scripts/run_batch_parallel.py --ns3-dir "$HOME/ns-3.48" \
-  --workers 8 --nNodes 20 --simTime 120 --nRuns 20 --alcance 250 --seed 1 --arp permanente
+  --workers 8 --nNodes 20 --simTime 120 --nRuns 100 --alcance 250 --seed 1 --arp permanente
 ```
 
 ### Uma execução isolada
@@ -65,7 +65,7 @@ Sem os filtros (`--protocolo`, `--area`, `--velocidade`, `--run`) o programa rod
 |---|---|---|---|
 | `--nNodes` | 20 | nós | Número de nós |
 | `--simTime` | 120 | s | Tempo total de simulação |
-| `--nRuns` | 5 | — | Repetições por combinação (o artigo usa 20) |
+| `--nRuns` | 5 | — | Repetições por combinação (o artigo usa 100) |
 | `--alcance` | 250 | m | Alcance do rádio (modelo de disco) |
 | `--seed` | 1 | — | Seed mestre (`RngSeedManager::SetSeed`) |
 | `--arp` | `permanente` | — | `permanente`: tabelas ARP pré-preenchidas; `dinamico`: ARP padrão do ns-3 (ver Cenário) |
@@ -91,7 +91,7 @@ Sem os filtros (`--protocolo`, `--area`, `--velocidade`, `--run`) o programa rod
 | Protocolos | AODV, OLSR, DSDV (parâmetros padrão do ns-3.48) |
 | Aplicação | UDP (`UdpEchoClient`/`UdpEchoServer`), 4 fluxos simultâneos (nó *i* → nó 19−*i*, *i* = 0…3), 512 B de dados a 1 pacote/s por fluxo, de 10 s até o fim; cada fluxo começa com atraso aleatório de até 1 s (sorteado com stream fixo, igual para os três protocolos) para os quatro não transmitirem sempre no mesmo instante |
 | Tempo de simulação | 120 s |
-| Repetições | 20 por combinação (*run* 1 a 20) |
+| Repetições | 100 por combinação (*run* 1 a 100) |
 | Aleatoriedade | Seed mestre fixa `1` e *run* = número da repetição. Para a mesma repetição, as trajetórias dos nós são idênticas nos três protocolos |
 
 > Área = 500 m é o experimento-base (matriz exigida); área = 750 m é a extensão experimental do grupo, separada da matriz-base.
@@ -128,7 +128,7 @@ python3 scripts/analyze.py
 python3 scripts/figuras_artigo.py
 ```
 
-`analyze.py` valida os dados antes de gerar os gráficos: PDR fora de 0–100%, execuções sem pacote enviado, quantidade de repetições diferente de 20 (ajuste com `--expected-runs`; `0` desativa), `pacotes_enviados` diferente entre protocolos na mesma repetição, fluxos cuja soma não bate com o total da execução e fluxos sem nenhum pacote recebido. CSVs gerados por versões antigas do simulador (sem a coluna `seed`) são recusados. `figuras_artigo.py` gera as figuras do artigo (painéis 2×2) em `article/figuras/`.
+`analyze.py` valida os dados antes de gerar os gráficos: PDR fora de 0–100%, execuções sem pacote enviado, quantidade de repetições diferente de 100 (ajuste com `--expected-runs`; `0` desativa), `pacotes_enviados` diferente entre protocolos na mesma repetição, fluxos cuja soma não bate com o total da execução e fluxos sem nenhum pacote recebido. CSVs gerados por versões antigas do simulador (sem a coluna `seed`) são recusados. `figuras_artigo.py` gera as figuras do artigo (painéis 2×2) em `article/figuras/`.
 
 ### Interface visual opcional
 
@@ -150,7 +150,7 @@ Também pode ser compilado no Overleaf (envie a pasta `article/` inteira; compil
 
 ## Rastreabilidade
 
-A versão do código, dos dados e do PDF citada no artigo é a *tag* [`artigo-v1`](https://github.com/Player07x/manet-routing-ns3/tree/artigo-v1) (`git checkout artigo-v1` depois de clonar). Os resultados do artigo correspondem ao commit registrado em `data/raw/metadados.json` (campo `commit_repositorio`) e em cada linha de `data/raw/execucoes.csv`. Para reproduzir: clone o repositório, instale o ns-3 3.48, rode `WORKERS=8 ./scripts/run_batch.sh` e depois os dois scripts de análise. Como seed e *run* são fixos, os CSVs gerados são idênticos aos versionados (exceto os horários do log).
+A versão do código, dos dados e do PDF citada no artigo é a *tag* [`artigo-v2`](https://github.com/Player07x/manet-routing-ns3/tree/artigo-v2) (`git checkout artigo-v2` depois de clonar; a `artigo-v1` é a versão anterior, com 20 repetições). Os resultados do artigo correspondem ao commit registrado em `data/raw/metadados.json` (campo `commit_repositorio`) e em cada linha de `data/raw/execucoes.csv`. Para reproduzir: clone o repositório, instale o ns-3 3.48, rode `WORKERS=8 ./scripts/run_batch.sh` e depois os dois scripts de análise. Como seed e *run* são fixos, os CSVs gerados no mesmo ambiente são idênticos aos versionados (exceto os horários do log). Com outro compilador podem surgir pequenas diferenças: das 480 execuções em comum entre a bateria anterior (g++ 15.2.0) e a atual (g++ 13.3.0), 67 diferiram, todas do AODV menos uma do DSDV.
 
 ## Estrutura do repositório
 
