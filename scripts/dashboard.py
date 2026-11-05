@@ -61,15 +61,39 @@ def to_wsl_path(path: Path, distro: str) -> str:
         result = subprocess.run(
             ["wsl.exe", "-d", distro, "--", "wslpath", "-a", str(path)],
             capture_output=True,
-            text=True,
             check=True,
         )
-        return result.stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
+        output = result.stdout
+        if isinstance(output, bytes):
+            # WSL.exe can emit UTF-16LE without a BOM when called from a
+            # Windows process. Detect that form before decoding the path.
+            encoding = "utf-16-le" if b"\x00" in output else "utf-8"
+            output = output.decode(encoding)
+        converted = output.replace("\x00", "").strip()
+        # A successful conversion of this absolute repository path must not
+        # collapse to the WSL root; treat that result like a failed lookup so
+        # the deterministic drive-letter fallback below can be used.
+        if converted and converted != "/":
+            return converted
+    except (OSError, UnicodeDecodeError, subprocess.CalledProcessError):
+        pass
+
+    try:
         drive = path.drive.rstrip(":").lower()
         if not drive:
             return str(path)
         return f"/mnt/{drive}/{path.as_posix().split(':/', 1)[-1]}"
+    except (AttributeError, TypeError):
+        return str(path)
+
+
+def shell_path(value: str) -> str:
+    """Quote a path for bash while keeping a leading ``~`` expandable."""
+    if value == "~":
+        return '"$HOME"'
+    if value.startswith("~/"):
+        return f'"$HOME"/{shlex.quote(value[2:])}'
+    return shlex.quote(value)
 
 
 def start_simulation(
@@ -79,11 +103,12 @@ def start_simulation(
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / "dashboard-run.log"
     repo_runtime = to_wsl_path(REPO_DIR, distro)
+    # O dashboard roda no Windows, mas o lote roda dentro do WSL. Use o
+    # caminho completo do script diretamente no comando, em vez de guardá-lo
+    # em uma variável do shell.
+    script_runtime = f"{repo_runtime.rstrip('/')}/scripts/run_batch_parallel.py"
     command = f"""set -e
-NS3_DIR={shlex.quote(ns3_dir)}
-NS3_DIR="${{NS3_DIR/#\\~/$HOME}}"
-REPO_DIR={shlex.quote(repo_runtime)}
-exec python3 "$REPO_DIR/scripts/run_batch_parallel.py" --ns3-dir "$NS3_DIR" \\
+exec python3 {shlex.quote(script_runtime)} --ns3-dir {shell_path(ns3_dir)} \\
     --workers {workers} --nNodes {n_nodes} --simTime {sim_time:g} --nRuns {n_runs} \\
     --alcance {alcance:g}
 """
