@@ -1,6 +1,6 @@
 # data/
 
-- `raw/` — saída da bateria completa (480 execuções; ver `README.md` na raiz):
+- `raw/` — saída da bateria completa (2.400 execuções; ver `README.md` na raiz):
   - `resultados-aodv-olsr-dsdv.csv` — uma linha por execução;
   - `resultados-por-fluxo.csv` — uma linha por fluxo de cada execução;
   - `execucoes.csv` — log de cada execução (parâmetros, versão do ns-3, commit, horários);

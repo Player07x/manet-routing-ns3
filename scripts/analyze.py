@@ -48,7 +48,7 @@ CENARIOS = [
     (500.0, "area500_base", "cenário-base, 500×500 m"),
     (750.0, "area750_extensao", "extensão do grupo, 750×750 m"),
 ]
-REPETICOES_ESPERADAS = 20
+REPETICOES_ESPERADAS = 100
 
 # Paleta Okabe-Ito (seguro para daltonismo), uma cor fixa por protocolo
 CORES = {"AODV": "#0072B2", "OLSR": "#E69F00", "DSDV": "#009E73"}

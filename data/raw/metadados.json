@@ -1,16 +1,16 @@
 {
-  "inicio_utc": "2026-11-04T21:24:06Z",
-  "fim_utc": "2026-11-04T21:31:36Z",
-  "commit_repositorio": "fc7e4cf723971f59ebe08d0fbb90c828912ebb78",
+  "inicio_utc": "2026-11-05T12:14:50Z",
+  "fim_utc": "2026-11-05T13:08:01Z",
+  "commit_repositorio": "f67500196957312ba2abc75524216fc36463c2c5+alteracoes-locais",
   "versao_ns3": "3.48",
-  "compilador": "g++ (Ubuntu 15.2.0-16ubuntu1) 15.2.0",
-  "sistema": "Ubuntu 26.04.1 LTS",
-  "kernel": "7.0.0-42-generic",
-  "python": "3.14.4",
+  "compilador": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "sistema": "Ubuntu 24.04.5 LTS",
+  "kernel": "6.6.114.1-microsoft-standard-WSL2",
+  "python": "3.12.3",
   "parametros": {
     "nNodes": 20,
     "simTime_s": 120.0,
-    "nRuns": 20,
+    "nRuns": 100,
     "alcance_m": 250.0,
     "seed": 1,
     "arp": "permanente",
@@ -30,5 +30,5 @@
       20.0
     ]
   },
-  "execucoes": 480
+  "execucoes": 2400
 }

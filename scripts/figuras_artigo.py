@@ -62,8 +62,9 @@ def main():
             if rotulo not in rotulos:
                 alcas.append(alca)
                 rotulos.append(rotulo)
+    repeticoes = "/".join(sorted({f"{linha['n']:g}" for linha in agregados}))
     fig.legend(alcas, rotulos, loc="outside lower center", ncol=4, frameon=False,
-               title="Média de 20 repetições; barras de erro: IC 95%", title_fontsize=7.5)
+               title=f"Média de {repeticoes} repetições; barras de erro: IC 95%", title_fontsize=7.5)
     destino = SAIDA / "metricas_artigo.pdf"
     fig.savefig(destino)
     plt.close(fig)

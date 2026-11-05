@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builda e roda, em paralelo, a bateria completa usada no artigo
-# (3 protocolos x 2 areas x 4 velocidades x 20 repeticoes = 480 execucoes,
+# (3 protocolos x 2 areas x 4 velocidades x 100 repeticoes = 2400 execucoes,
 # 120 s cada, alcance de 250 m, seed 1, ARP permanente) e grava os resultados em data/raw/.
 #
 # Uso:
@@ -17,7 +17,7 @@ NS3_DIR="${NS3_DIR:-$HOME/ns-3.48}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKERS="${WORKERS:-4}"
 SIM_TIME=120
-N_RUNS=20
+N_RUNS=100
 ALCANCE=250
 SEED=1
 ARP=permanente
